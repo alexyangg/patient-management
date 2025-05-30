@@ -4,6 +4,8 @@ import com.pm.patientservice.dto.PatientRequestDTO;
 import com.pm.patientservice.dto.PatientResponseDTO;
 import com.pm.patientservice.dto.validators.CreatePatientValidationGroup;
 import com.pm.patientservice.service.PatientService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.groups.Default;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -14,6 +16,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/patients") // https://localhost:4000/patients
+@Tag(name = "Patient", description = "API for managing Patients")
 public class PatientController {
     private final PatientService patientService;
 
@@ -22,6 +25,7 @@ public class PatientController {
     }
 
     @GetMapping
+    @Operation(summary = "Get Patients")
     public ResponseEntity<List<PatientResponseDTO>> getPatients() {
         List<PatientResponseDTO> patients = patientService.getPatients();
         return ResponseEntity.ok().body(patients);
@@ -29,6 +33,7 @@ public class PatientController {
 
     // @Valid annotation ensures that the validation annotations added in the patientRequestDTO object are checked
     @PostMapping
+    @Operation(summary = "Create a new Patient")
     public ResponseEntity<PatientResponseDTO> createPatient(
             @Validated({Default.class, CreatePatientValidationGroup.class})
             @RequestBody PatientRequestDTO patientRequestDTO) {
@@ -39,6 +44,7 @@ public class PatientController {
 
     // @PathVariable tells Spring that the UUID id arg corresponds to the id in the @PutMapping
     @PutMapping("/{id}")
+    @Operation(summary = "Update a new Patient")
     public ResponseEntity<PatientResponseDTO> updatePatient(@PathVariable UUID id,
                                                             @Validated({Default.class})
                                                             @RequestBody PatientRequestDTO patientRequestDTO) {
@@ -48,6 +54,7 @@ public class PatientController {
     }
 
     @DeleteMapping("/{id}")
+    @Operation(summary = "Delete a Patient")
     public ResponseEntity<Void> deletePatient(@PathVariable UUID id) {
         patientService.deletePatient(id);
         return ResponseEntity.noContent().build();
