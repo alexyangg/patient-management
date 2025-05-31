@@ -15,8 +15,8 @@ import java.util.List;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/patients") // https://localhost:4000/patients
-@Tag(name = "Patient", description = "API for managing Patients")
+@RequestMapping("/patients") // http://localhost:4000/patients
+@Tag(name = "Patient", description = "API for managing Patients") // http://localhost:4000/v3/api-docs
 public class PatientController {
     private final PatientService patientService;
 
