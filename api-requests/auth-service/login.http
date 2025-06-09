@@ -1,5 +1,5 @@
-### Login request to retrieve a token
-POST http://localhost:4005/login
+### Login request to retrieve a token, using the API gateway
+POST http://localhost:4004/auth/login
 Content-Type: application/json
 
 {
@@ -9,3 +9,15 @@ Content-Type: application/json
 
 > {% client.global.set("token", response.body.token) %}
 ###
+
+#### Login request to retrieve a token
+#POST http://localhost:4005/login
+#Content-Type: application/json
+#
+#{
+#  "email": "testuser@test.com",
+#  "password": "password123"
+#}
+#
+#> {% client.global.set("token", response.body.token) %}
+####
