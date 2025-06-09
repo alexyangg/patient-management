@@ -25,6 +25,7 @@ spring:
             - Path=/api/patients/**
           filters:
             - StripPrefix=1
+            - JwtValidation # Spring will look for a class suffixed with GatewayFilterFactory
 
         # route for API docs endpoint
         # REST CLIENT -> http://localhost:4004/api-docs/patients
