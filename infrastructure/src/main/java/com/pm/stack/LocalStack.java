@@ -3,6 +3,8 @@ package com.pm.stack;
 import software.amazon.awscdk.*;
 import software.amazon.awscdk.services.ec2.*;
 import software.amazon.awscdk.services.ec2.InstanceType;
+import software.amazon.awscdk.services.ecs.CloudMapNamespaceOptions;
+import software.amazon.awscdk.services.ecs.Cluster;
 import software.amazon.awscdk.services.msk.CfnCluster;
 import software.amazon.awscdk.services.rds.*;
 import software.amazon.awscdk.services.route53.CfnHealthCheck;
@@ -11,6 +13,7 @@ import java.util.stream.Collectors;
 
 public class LocalStack extends Stack {
     private final Vpc vpc;
+    private final Cluster ecsCluster;
 
     // boilerplate code to create a new stack
     public LocalStack(final App scope, final String id, final StackProps props) {
@@ -26,6 +29,8 @@ public class LocalStack extends Stack {
         CfnHealthCheck patientServiceDbHealthCheck = createDbHealthCheck(patientServiceDb, "PatientServiceDBHealthCheck");
 
         CfnCluster mskCluster = createMskCluster();
+
+        this.ecsCluster = createEcsCluster();
     }
 
     // VPC creates routing and networks required for our internal services to communicate with each other
@@ -81,6 +86,18 @@ public class LocalStack extends Stack {
                                 .collect(Collectors.toList())) // connect Kafka broker to VPC using VPC private subnet
                         .brokerAzDistribution("DEFAULT") // specify which brokers belong to which availability zones
                         .build())
+                .build();
+    }
+
+    // e.g. when we create a service, other microservices can find this service by using:
+    // auth-service.patient-management.local
+    // we don't need to know IPs and internal addresses of our ECS services, all managed by cloud map service discovery
+    private Cluster createEcsCluster() {
+        return Cluster.Builder.create(this, "PatientManagementCluster")
+                .vpc(vpc)
+                .defaultCloudMapNamespace(CloudMapNamespaceOptions.builder() // sets up cloud map namespace for service
+                        .name("patient-management.local") // discovery in AWS ECS allowing microservices to find and
+                        .build()) // communicate with each other using this domain
                 .build();
     }
 
