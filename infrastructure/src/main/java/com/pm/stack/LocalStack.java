@@ -6,6 +6,7 @@ import software.amazon.awscdk.services.ec2.InstanceSize;
 import software.amazon.awscdk.services.ec2.InstanceType;
 import software.amazon.awscdk.services.ec2.Vpc;
 import software.amazon.awscdk.services.rds.*;
+import software.amazon.awscdk.services.route53.CfnHealthCheck;
 
 public class LocalStack extends Stack {
     private final Vpc vpc;
@@ -18,6 +19,10 @@ public class LocalStack extends Stack {
 
         DatabaseInstance authServiceDb = createDatabase("AuthServiceDB", "auth-service-db");
         DatabaseInstance patientServiceDb = createDatabase("PatientServiceDB", "patient-service-db");
+
+        // can pass health checks to any dependent services
+        CfnHealthCheck authServiceDbHealthCheck = createDbHealthCheck(authServiceDb, "AuthServiceDBHealthCheck");
+        CfnHealthCheck patientServiceDbHealthCheck = createDbHealthCheck(patientServiceDb, "PatientServiceDBHealthCheck");
     }
 
     // VPC creates routing and networks required for our internal services to communicate with each other
@@ -44,6 +49,19 @@ public class LocalStack extends Stack {
                 .credentials(Credentials.fromGeneratedSecret("admin_user"))
                 .databaseName(dbName)
                 .removalPolicy(RemovalPolicy.DESTROY) // remove database storage when stack is removed. in prod, need to specify backup policy
+                .build();
+    }
+
+    // create health check construct to return health status of db
+    private CfnHealthCheck createDbHealthCheck(DatabaseInstance db, String id) {
+        return CfnHealthCheck.Builder.create(this, id)
+                .healthCheckConfig(CfnHealthCheck.HealthCheckConfigProperty.builder()
+                        .type("TCP") // use TCP endpoint to check if port online
+                        .port(Token.asNumber(db.getDbInstanceEndpointPort()))
+                        .ipAddress(db.getDbInstanceEndpointAddress())
+                        .requestInterval(30) // check db every 30 sec
+                        .failureThreshold(3) // report failure if already tried 3 times
+                        .build())
                 .build();
     }
 
