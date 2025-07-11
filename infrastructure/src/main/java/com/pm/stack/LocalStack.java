@@ -1,14 +1,20 @@
 package com.pm.stack;
 
+import io.github.cdimascio.dotenv.Dotenv;
 import software.amazon.awscdk.*;
 import software.amazon.awscdk.services.ec2.*;
 import software.amazon.awscdk.services.ec2.InstanceType;
-import software.amazon.awscdk.services.ecs.CloudMapNamespaceOptions;
-import software.amazon.awscdk.services.ecs.Cluster;
+import software.amazon.awscdk.services.ecs.*;
+import software.amazon.awscdk.services.ecs.Protocol;
+import software.amazon.awscdk.services.logs.LogGroup;
+import software.amazon.awscdk.services.logs.RetentionDays;
 import software.amazon.awscdk.services.msk.CfnCluster;
 import software.amazon.awscdk.services.rds.*;
 import software.amazon.awscdk.services.route53.CfnHealthCheck;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class LocalStack extends Stack {
@@ -31,6 +37,44 @@ public class LocalStack extends Stack {
         CfnCluster mskCluster = createMskCluster();
 
         this.ecsCluster = createEcsCluster();
+
+        Dotenv dotenv = Dotenv.load();
+        String jwtSecret = dotenv.get("JWT_SECRET");
+
+        FargateService authService = createFargateService("AuthService",
+                "auth-service",
+                List.of(4005),
+                authServiceDb,
+                Map.of("JWT_SECRET", jwtSecret));
+        authService.getNode().addDependency(authServiceDbHealthCheck);
+        authService.getNode().addDependency(authServiceDb);
+
+        FargateService billingService = createFargateService("BillingService",
+                "billing-service",
+                List.of(4001, 9001), // gRPC runs on port 9001
+                null,
+                null);
+
+        FargateService analyticsService = createFargateService("AnalyticsService",
+                "analytics-service",
+                List.of(4002),
+                null,
+                null);
+        analyticsService.getNode().addDependency(mskCluster); // receives patient created events
+
+        FargateService patientService = createFargateService("PatientService",
+                "patient-service",
+                List.of(4000),
+                patientServiceDb,
+                Map.of(
+                        "BILLING_SERVICE_ADDRESS", "host.docker.internal",
+                        "BILLING_SERVICE_GRPC_PORT", "9001"
+                ));
+        patientService.getNode().addDependency(patientServiceDb);
+        patientService.getNode().addDependency(patientServiceDbHealthCheck);
+        patientService.getNode().addDependency(billingService); // whenever patient created, gRPC request sent to billingService
+        patientService.getNode().addDependency(mskCluster); // sends patient created events
+
     }
 
     // VPC creates routing and networks required for our internal services to communicate with each other
@@ -89,6 +133,7 @@ public class LocalStack extends Stack {
                 .build();
     }
 
+    // creates am Amazon Elastic Container Service (ECS) cluster
     // e.g. when we create a service, other microservices can find this service by using:
     // auth-service.patient-management.local
     // we don't need to know IPs and internal addresses of our ECS services, all managed by cloud map service discovery
@@ -98,6 +143,77 @@ public class LocalStack extends Stack {
                 .defaultCloudMapNamespace(CloudMapNamespaceOptions.builder() // sets up cloud map namespace for service
                         .name("patient-management.local") // discovery in AWS ECS allowing microservices to find and
                         .build()) // communicate with each other using this domain
+                .build();
+    }
+
+    // FargateService is a type of ECS service
+    private FargateService createFargateService(String id,
+                                                String imageName,
+                                                List<Integer> ports,
+                                                DatabaseInstance db,
+                                                Map<String, String> additionalEnvVars) {
+
+        // ECS task runs container
+        // create task definition (blueprint)
+        FargateTaskDefinition taskDefinition = FargateTaskDefinition.Builder.create(this, id + "Task")
+                .cpu(256) // 256 CPU units
+                .memoryLimitMiB(512) // 512 MB
+                .build();
+
+        ContainerDefinitionOptions.Builder containerOptions = ContainerDefinitionOptions.builder()
+                .image(ContainerImage.fromRegistry(imageName)) // image the container will be created from
+                .portMappings(ports.stream()
+                        .map(port -> PortMapping.builder()
+                                .containerPort(port)
+                                .hostPort(port) // container exposes this port so other services can access it
+                                .protocol(Protocol.TCP)
+                                .build())
+                        .toList())
+                .logging(LogDriver.awsLogs(AwsLogDriverProps.builder()
+                                .logGroup(LogGroup.Builder.create(this, id + "LogGroup")
+                                        .logGroupName("/ecs/" + imageName)
+                                        .removalPolicy(RemovalPolicy.DESTROY) // destroy logs when stack destroyed
+                                        .retention(RetentionDays.ONE_DAY) // keep logs
+                                        .build())
+                                .streamPrefix(imageName)
+                        .build()));
+//                .build(); // keep container options as a Builder instance
+
+        Map<String, String> envVars = new HashMap<>();
+        // specify where the Kafka boostrap brokers are located
+        envVars.put("SPRING_KAFKA_BOOTSTRAP_SERVERS",
+                "localhost.localstack.cloud:4510, localhost.localstack.cloud:4511, localhost.localstack.cloud:4512");
+
+        if (additionalEnvVars != null) {
+            envVars.putAll(additionalEnvVars); // merge all environment variables together
+        }
+
+        /*
+        Configuring environment variables here very similar to adding env vars to our run configuration whenever
+        we created an image and container for a given service during development in the IDE.
+        */
+        // if service requires database, configure environment variables for that db
+        if (db != null) {
+            envVars.put("SPRING_DATASOURCE_URL", "jdbc:postgresql://%s:%s/%s-db".formatted( // %s are placeholders for jdbc connection string
+                    db.getDbInstanceEndpointAddress(), // gets added to first %s
+                    db.getDbInstanceEndpointPort(), // gets added to second %s
+                    imageName // added to third %s
+            ));
+            envVars.put("SPRING_DATASOURCE_USERNAME", "admin_user");
+            envVars.put("SPRING_DATASOURCE_PASSWORD", db.getSecret().secretValueFromJson("password").toString());
+            envVars.put("SPRING_JPA_HIBERNATE_DDL_AUTO", "update"); // run JPA hibernate stuff
+            envVars.put("SPRING_SQL_INIT_MODE", "always"); // run data.sql script
+            envVars.put("SPRING_DATASOURCE_HIKARI_INITIALIZATION_FAIL_TIMEOUT", "60000"); // retries to spin up database a few times instead of failing right away
+        }
+
+        containerOptions.environment(envVars);
+        taskDefinition.addContainer(imageName + "Container", containerOptions.build()); // this is how we link image to container and link container to a task definition
+
+        return FargateService.Builder.create(this, id)
+                .cluster(ecsCluster)
+                .taskDefinition(taskDefinition)
+                .assignPublicIp(false) // since service is internal
+                .serviceName(imageName)
                 .build();
     }
 
