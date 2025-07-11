@@ -6,6 +6,7 @@ import software.amazon.awscdk.services.ec2.*;
 import software.amazon.awscdk.services.ec2.InstanceType;
 import software.amazon.awscdk.services.ecs.*;
 import software.amazon.awscdk.services.ecs.Protocol;
+import software.amazon.awscdk.services.ecs.patterns.ApplicationLoadBalancedFargateService;
 import software.amazon.awscdk.services.logs.LogGroup;
 import software.amazon.awscdk.services.logs.RetentionDays;
 import software.amazon.awscdk.services.msk.CfnCluster;
@@ -75,6 +76,7 @@ public class LocalStack extends Stack {
         patientService.getNode().addDependency(billingService); // whenever patient created, gRPC request sent to billingService
         patientService.getNode().addDependency(mskCluster); // sends patient created events
 
+        createApiGatewayService();
     }
 
     // VPC creates routing and networks required for our internal services to communicate with each other
@@ -215,6 +217,48 @@ public class LocalStack extends Stack {
                 .assignPublicIp(false) // since service is internal
                 .serviceName(imageName)
                 .build();
+    }
+
+    private void createApiGatewayService() {
+        FargateTaskDefinition taskDefinition =
+                FargateTaskDefinition.Builder.create(this, "APIGatewayTaskDefinition")
+                .cpu(256) // 256 CPU units
+                .memoryLimitMiB(512) // 512 MB
+                .build();
+
+        ContainerDefinitionOptions containerOptions = ContainerDefinitionOptions.builder()
+                .image(ContainerImage.fromRegistry("api-gateway")) // image the container will be created from
+                .environment(Map.of(
+                        "SPRING_PROFILES_ACTIVE", "prod",
+                        "AUTH_SERVICE_URL", "http://host.docker.internal:4005" // LocalStack doesn't implement service discovery very well, just use Docker internal service discovery with port
+                )) // add env vars inline
+                .portMappings(List.of(4004).stream()
+                        .map(port -> PortMapping.builder()
+                                .containerPort(port)
+                                .hostPort(port) // container exposes this port so other services can access it
+                                .protocol(Protocol.TCP)
+                                .build())
+                        .toList())
+                .logging(LogDriver.awsLogs(AwsLogDriverProps.builder()
+                        .logGroup(LogGroup.Builder.create(this, "ApiGatewayLogGroup")
+                                .logGroupName("/ecs/api-gateway")
+                                .removalPolicy(RemovalPolicy.DESTROY) // destroy logs when stack destroyed
+                                .retention(RetentionDays.ONE_DAY) // keep logs
+                                .build())
+                        .streamPrefix("api-gateway")
+                        .build()))
+                .build();
+
+        taskDefinition.addContainer("APIGatewayContainer", containerOptions);
+
+        ApplicationLoadBalancedFargateService apiGateway =
+                ApplicationLoadBalancedFargateService.Builder.create(this, "APIGatewayService")
+                        .cluster(ecsCluster)
+                        .serviceName("api-gateway")
+                        .taskDefinition(taskDefinition)
+                        .desiredCount(1) // run 1 instance, can increase if more traffic
+                        .healthCheckGracePeriod(Duration.seconds(60)) // how long the application load balancer will wait for API gateway container to start before it fails
+                        .build();
     }
 
     public static void main(final String[] args) {
