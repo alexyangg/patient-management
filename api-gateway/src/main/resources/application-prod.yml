@@ -1,0 +1,44 @@
+server:
+  port: 4004 # gateway listens on port 4004
+
+spring:
+  cloud:
+    gateway:
+      routes:
+
+        # REST CLIENT -> http://localhost:4004/auth/login
+        # API GATEWAY -> http://host.docker.internal:4005/login
+        - id: auth-service-route
+          uri: http://host.docker.internal:4005 # let Docker decide where to send request based on Docker host name and port
+          predicates:
+            - Path=/auth/**
+          filters:
+            - StripPrefix=1
+
+        # route for CRUD operation endpoints
+        # REST CLIENT -> https://localhost:4004/api/patients
+        # API GATEWAY -> http://host.docker.internal:4000/patients
+        # PATIENT SERVICE (SPRING BOOT APP) -> /patients -> Patients Array
+        - id: patient-service-route
+          uri: http://host.docker.internal:4000
+          predicates:
+            - Path=/api/patients/**
+          filters:
+            - StripPrefix=1
+            - JwtValidation # Spring will look for a class suffixed with GatewayFilterFactory
+
+        # route for API docs endpoint
+        # REST CLIENT -> http://localhost:4004/api-docs/patients
+        # API GATEWAY -> http://host.docker.internal:4000/v3/api-docs
+        - id: api-docs-patient-route
+          uri: http://host.docker.internal:4000
+          predicates:
+            - Path=/api-docs/patients
+          filters:
+            - RewritePath=/api-docs/patients, /v3/api-docs
+        - id: api-docs-auth-route
+          uri: http://host.docker.internal:4005
+          predicates:
+            - Path=/api-docs/auth
+          filters:
+            - RewritePath=/api-docs/auth, /v3/api-docs
