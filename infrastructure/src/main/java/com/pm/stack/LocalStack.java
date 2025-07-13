@@ -124,7 +124,7 @@ public class LocalStack extends Stack {
         return CfnCluster.Builder.create(this, "MskCluster")
                 .clusterName("kafka-cluster")
                 .kafkaVersion("2.8.0")
-                .numberOfBrokerNodes(1) // in prod, usually have higher # of broker nodes for resiliency reasons
+                .numberOfBrokerNodes(2) // in prod, usually have higher # of broker nodes for resiliency reasons
                 .brokerNodeGroupInfo(CfnCluster.BrokerNodeGroupInfoProperty.builder()
                         .instanceType("kafka.m5.xlarge") // specify compute power this Kafka cluster is going to use
                         .clientSubnets(vpc.getPrivateSubnets().stream()

@@ -1,10 +1,12 @@
 ### POST request to create a new patient entity
-POST http://localhost:4004/api/patients
+#POST http://localhost:4004/api/patients
+POST http://lb-4fd59ecb.elb.localhost.localstack.cloud:4004/api/patients
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "name": "John Doe testing new api gateway",
-  "email": "test2@example.com",
+  "email": "test3@example.com",
   "address": "123 Main St",
   "dateOfBirth": "2000-01-30",
   "registeredDate": "2025-05-25"
